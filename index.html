@@ -1,0 +1,272 @@
+<!doctype html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+
+  <title>color cube</title>
+  <meta name="author" content="rhyolight">
+
+  <link href="https://fonts.googleapis.com/css2?family=Acme&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Acme', cursive;
+    }
+
+    section.desc {
+      position: absolute;
+      right: 0;
+      top: 130px;
+      width: 400px;
+      padding: 10px;
+      font-size: 16pt;
+    }
+
+  </style>
+
+  <script src="js/dat.gui.min.js"></script>
+
+</head>
+<body>
+
+  <section class="canvas">
+    <canvas id="art"></canvas>
+  </section>
+
+  <section class="desc">
+    <h2>what's</h2>
+    <h2>this?</h2>
+    <p>
+      This is a <a href="https://beta.cent.co/+v2qijy">cellular automaton</a>. This is what 
+      I (<a href="https://rhyolight.net">rhyolight</a>) used to create the crypto artwork <em>"color cube"</em> 
+      on <a href="https://superrare.co/">SuperRare</a>. 
+    </p>
+    <blockquote>
+      The "impossible cube" graphic was originally taken from <a href="https://commons.wikimedia.org/w/index.php?curid=5591083">Wikipedia</a> under <a href="https://creativecommons.org/licenses/by-sa/3.0" title="Creative Commons Attribution-Share Alike 3.0">CC BY-SA 3.0</a>.
+    </blockquote>
+    <p>
+      Fiddle with the sliders in the top right to change how the cellular automata computes. Changing the left and right sliders affects the location of the local topology for the cellular automata computation.
+    </p>
+  </section>
+
+  <script>
+
+let mod = function (a, b) {
+      return (a % b + b) % b;
+    }
+    // Standard Normal variate using Box-Muller transform.
+    let randomBoxMuller = function () {
+        let u = 0,
+            v = 0;
+        while (u === 0) u = Math.random(); //Converting [0,1) to (0,1)
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    };
+
+    function randomTorusWalk(d, w, h, speed) {
+        let X = [];
+        let V = [];
+        let x = [0.5 * w, 0.5 * h];
+
+        X.push(x.slice());
+        let v = [0.0, 0.0];
+        let theta = 0.0;
+
+        for (let t = 0; t < d; t++) {
+            theta += randomBoxMuller() / 4;
+            v[0] = speed * Math.cos(theta);
+            v[1] = speed * Math.sin(theta);
+            x[0] += v[0];
+            x[1] += v[1];
+            x[0] = mod(x[0], w);
+            x[1] = mod(x[1], h);
+            X.push(x.slice());
+            V.push(v.slice());
+        }
+        return [X, V];
+    }
+
+    function initializeState(size) {
+      let out = []
+      for (var i=0; i<size; i++) {
+        out.push(Math.max(Math.random()*2, 1))
+      }
+      return out
+    }
+
+    function indexToXY(i, dim) {
+      let x = Math.floor(i / dim)
+      let y = (i - x * dim)
+      return [x, y] 
+    }
+
+
+    const dim = 400
+    const stretch = 2
+    const interval = 100
+    const sdim = dim * stretch
+    const walkers = 1
+
+    let walkDistance = 200
+    let walkSpeed = 10
+    let walkerPaths = []
+    let walkLocs = []
+
+    for (let x=0; x<walkers; x++) {
+      let [X, V] = randomTorusWalk(walkDistance, sdim, sdim, walkSpeed)
+      walkerPaths.push(X)
+      walkLocs.push({x: sdim / 2 + x * 10, y: sdim / 2 + x * 10})
+    }
+
+    let loop
+    let frame = 0
+    let picData
+
+    let Cfg = function() {
+      this.left = -100
+      this.right = 100
+      this.growth = 0.01
+      this.top = 0
+      this.bottom = -1
+      this.color1 = [255,255,255]
+    }
+    let cfg = new Cfg()
+    let gui = new dat.GUI()
+    gui.add(cfg, 'growth', 0.01, 0.25).step(0.005)
+    gui.addColor(cfg, 'color1')
+    // gui.addColor(cfg, 'color2')
+    let neighborhood = gui.addFolder('Neighborhood')
+    neighborhood.add(cfg, 'left', -100, 100)
+    neighborhood.add(cfg, 'right', -100, 100)
+    neighborhood.open()
+
+    function stretchTranslate(fn, i, stretch, dim) {
+      // console.log(`updating pixel ${pixel}...`)
+      let [x, y] = indexToXY(i, dim)
+      let sx = x * stretch
+      let sy = y * stretch
+      let start = dim * stretch * sx + sy
+
+      for (var h=0; h<stretch; h++) {
+        for (var w=0; w<stretch; w++) {
+          let index = start + h*dim*stretch + w
+          fn(index, sx, sy)
+        }
+      } 
+    }
+
+    function updateImagePixelRGB(img, i, stretch, dim, r, g, b) {
+      stretchTranslate((index, sx, sy) => {
+        img[index * 4] = r
+        img[index * 4 + 1] = g
+        img[index * 4 + 2] = b
+        img[index * 4 + 3] = 255
+      }, i, stretch, dim)
+    }
+
+    function updateImageWithState(myImg, myState, dim, stretch) {
+      let width = dim
+      for (var i=0; i<myState.length; i++) {
+
+        // Apply colors
+        let r = myState[i] * cfg.color1[0]
+        let g = myState[i] * cfg.color1[1] 
+        let b = myState[i] * cfg.color1[2]
+        updateImagePixelRGB(
+          myImg.data, i, stretch, dim,
+          r, g, b
+        )
+
+        // Topological mean
+        let neighborhood = []
+        for (var v=cfg.bottom; v<cfg.top; v++) {
+          neighborhood = neighborhood.concat(
+            myState.slice(
+              i - width*v + cfg.left, 
+              i - width*v + cfg.right
+            )
+          )
+        }
+        let sum = neighborhood.reduce(
+          (previous, current) => current += previous, 0
+        )
+        let neighborAvg = sum / neighborhood.length;
+
+        if (picData) {
+          let picr = picData[i * 4]
+          let picg = picData[i * 4 + 1]
+          let picb = picData[i * 4 + 2]
+          let brightness = (picr + picg + picb) / (255*3)
+          let mod = frame % 100
+          if (brightness > (mod / 100)) {
+            myState[i] = myState[i] * brightness;
+          }
+        }
+
+        // Updates for next pass:
+
+        // Random walkers add growth
+        stretchTranslate((index, sx, sy) => {
+          for (let w=0; w<walkers; w++) {
+            // Walker interaction with state
+            let walkLoc = walkLocs[w]
+            let xdiff = Math.abs(walkLoc.x - sx)
+            let ydiff = Math.abs(walkLoc.y - sy)
+            let dist = Math.sqrt(Math.pow(walkLoc.x - sx, 2) + Math.pow(walkLoc.y - sy, 2))
+            myState[i] = Math.min(myState[i] + dist / 28000, 1)
+          }
+        }, i, stretch, dim)
+
+        // Topological mean applies random growth
+        if (neighborAvg > myState[i]) {
+          myState[i] = Math.min(myState[i] + cfg.growth*Math.random(), 1)
+        }
+
+        // Instant degradation upon hitting max
+        if (myState[i] == 1) myState[i] = Math.random() / 10
+      }
+    }
+
+    // Program Start
+
+    let canvas = document.getElementById('art')
+    let ctx = canvas.getContext('2d')
+    canvas.setAttribute('width', `${sdim}px`)
+    canvas.setAttribute('height', `${sdim}px`)
+
+    // Set up state
+    let state = initializeState(dim * dim)
+
+    let img = ctx.createImageData(sdim, sdim)
+    updateImageWithState(img, state, dim, stretch)
+    ctx.putImageData(img, 0, 0)
+
+    let pic = new Image() 
+    pic.addEventListener('load', function() {
+      ctx.drawImage(pic, 20, 50)
+      picData = ctx.getImageData(0, 0, dim, dim).data
+      loop = setInterval(() => {
+        for (let x=0; x<walkers; x++) {
+          walkLocs[x] = {
+            x: walkerPaths[x][frame % walkDistance][0],
+            y: walkerPaths[x][frame % walkDistance][1],
+          }
+        }
+
+        let img = ctx.createImageData(sdim, sdim)
+        updateImageWithState(img, state, dim, stretch)
+        ctx.putImageData(img, 0, 0)
+        frame++
+      }, interval)
+    }, false);
+    pic.src = "img/Necker_cube_and_impossible_cube@1.8x.png"
+
+  </script>
+
+</body>
+
+
+
+</html>
